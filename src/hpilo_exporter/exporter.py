@@ -11,9 +11,12 @@ import prometheus_metrics
 from BaseHTTPServer import BaseHTTPRequestHandler
 from BaseHTTPServer import HTTPServer
 from SocketServer import ForkingMixIn
-from prometheus_client import generate_latest, Summary
+from prometheus_client import generate_latest, Summary, Gauge
 from urlparse import parse_qs
 from urlparse import urlparse
+
+import pprint
+pp = pprint.PrettyPrinter(indent=4)
 
 
 def print_err(*args, **kwargs):
@@ -98,6 +101,7 @@ class RequestHandler(BaseHTTPRequestHandler):
 
             # get health
             embedded_health = ilo.get_embedded_health()
+            #pp.pprint(embedded_health)
             health_at_glance = embedded_health['health_at_a_glance']
             
             if health_at_glance is not None:
@@ -130,6 +134,29 @@ class RequestHandler(BaseHTTPRequestHandler):
 #                                                                    server_name=server_name,
 #                                                                    nic_name=nic_name,
 #                                                                    ip_address=nic['ip_address']).set(value)
+
+            fans = embedded_health['fans']
+            if fans is not None:
+              for key, value in fans.items():
+                if value['status'] != 'Not Installed':
+                  gauge = 'hpilo_{}_gauge'.format(key.replace(" ", ""))
+                  prometheus_metrics.gauges[gauge] = Gauge('hpilo_fans_{}'.format(key.replace(" ", "")), 'HP iLO fan status', ["product_name", "server_name"])
+                  prometheus_metrics.gauges[gauge].labels(product_name=product_name,
+                                                                        server_name=server_name).set(value['speed'][0])
+
+            temps = embedded_health['temperature']
+            if temps is not None:
+              for key, value in temps.items():
+                if value['status'] != 'Not Installed':
+                  gauge = 'hpilo_{}_gauge'.format(key.replace(" ", ""))
+                  prometheus_metrics.gauges[gauge] = Gauge('hpilo_temp_{}'.format(key.replace("-", "_").replace("/", "").replace(" ", "")), 'HP iLO temp status', ["product_name", "server_name"])
+                  prometheus_metrics.gauges[gauge].labels(product_name=product_name,
+                                                                        server_name=server_name).set(value['currentreading'][0])
+
+            power_supply_summary = embedded_health['power_supply_summary']
+            if power_supply_summary is not None:
+              prometheus_metrics.gauges['power_usage_gauge'] = Gauge('hpilo_power_usage', 'HP iLO power usage', ["product_name", "server_name"])
+              prometheus_metrics.gauges['power_usage_gauge'].labels(product_name=product_name, server_name=server_name).set(power_supply_summary['present_power_reading'].split(" ")[0])
 
             # get firmware version
             fw_version = ilo.get_fw_version()["firmware_version"]
